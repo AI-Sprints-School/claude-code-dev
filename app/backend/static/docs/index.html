@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Кошелёк — API 1.4.0</title>
+    <link rel="stylesheet" href="/static/docs/swagger-ui.css" />
+    <style>
+      body { margin: 0; background: #fafafa; }
+      .topbar { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="/static/docs/swagger-ui-bundle.js"></script>
+    <script>
+      // Спецификация читается из рукописного файла spec/openapi.yaml.
+      // Схема из кода не генерируется: FastAPI создан с openapi_url=None.
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.yaml",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        displayRequestDuration: true,
+        defaultModelsExpandDepth: 1,
+        tryItOutEnabled: true
+      });
+    </script>
+  </body>
+</html>

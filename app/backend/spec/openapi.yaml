@@ -1,0 +1,718 @@
+# Спецификация API «Кошелька». Рукописный файл, первичный по отношению к коду.
+#
+# Файл пишется и вычитывается ДО первой строки обработчика и служит
+# приёмочным контрактом сборки. Схема из кода не генерируется — приложение
+# создано с openapi_url=None, — поэтому документ описывает ЗАДУМАННОЕ
+# поведение продукта.
+openapi: 3.0.3
+
+info:
+  title: Кошелёк API
+  version: 1.4.0
+  description: |
+    Личный счёт: баланс, пополнение, списание, история операций.
+
+    Все суммы — числа (`number`), не строки. Валюта одна (RUB) и в телах
+    запросов не передаётся. Максимальная сумма одной операции —
+    100 000 ₽, минимальная — 0,01 ₽.
+
+    Комиссия за списание: 1,5 % от суммы, минимум 10 ₽ (тариф `BASIC`).
+    Пополнение — без комиссии. На тарифе `FREE` комиссии нет вовсе.
+
+    Авторизация: непрозрачный токен, заголовок `Authorization: Bearer <token>`,
+    время жизни 7 суток. Повторный вход до истечения срока возвращает тот же
+    живой токен.
+
+    Ограничение частоты: 600 запросов в минуту на токен.
+
+servers:
+  - url: /
+    description: тот же хост, что и веб-клиент
+
+tags:
+  - name: auth
+    description: вход
+  - name: wallet
+    description: свой кошелёк
+  - name: wallets
+    description: чужие кошельки
+  - name: sql
+    description: SQL-консоль только на чтение
+  - name: assistant
+    description: AI-ассистент
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Вход по выданному логину и паролю
+      description: |
+        Регистрации в продукте нет: логин вида `student-07` и пароль
+        пользователь получает в приветственном письме.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              login: student-07
+              password: "<из приветственного письма>"
+      responses:
+        '200':
+          description: Токен выпущен или возвращён живой
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                token: 8f3c9a1b2d4e6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f6a
+                wallet_id: 42
+                login: student-07
+                expires_at: '2026-09-15T10:00:00Z'
+        '401':
+          description: Неверный логин или пароль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: INVALID_CREDENTIALS
+                  message: Неверный логин или пароль
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/wallet/balance:
+    get:
+      tags: [wallet]
+      summary: Баланс своего кошелька
+      responses:
+        '200':
+          description: Текущее состояние кошелька
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+              example:
+                wallet_id: 42
+                balance: 5000.00
+                currency: RUB
+                tariff: BASIC
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/wallet/topup:
+    post:
+      tags: [wallet]
+      summary: Пополнение счёта
+      description: |
+        Пополнение без комиссии. Баланс увеличивается на сумму операции,
+        в истории появляется строка `TOPUP` с полной суммой.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmountRequest'
+            example:
+              amount: 1000
+      responses:
+        '200':
+          description: Пополнение выполнено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopupResult'
+              example:
+                operation_id: 90124
+                type: TOPUP
+                amount: 1000.00
+                balance: 6000.00
+        '400':
+          description: |
+            Сумма не является числом больше нуля (`INVALID_AMOUNT`)
+            или превышает максимум операции (`AMOUNT_LIMIT_EXCEEDED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalid_amount:
+                  value:
+                    error:
+                      code: INVALID_AMOUNT
+                      message: Сумма должна быть числом больше нуля
+                limit_exceeded:
+                  value:
+                    error:
+                      code: AMOUNT_LIMIT_EXCEEDED
+                      message: Максимальная сумма одной операции — 100000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/wallet/withdraw:
+    post:
+      tags: [wallet]
+      summary: Списание со счёта
+      description: |
+        Списание с комиссией 1,5 %, минимум 10 ₽ (тариф `BASIC`). Комиссия
+        показывается отдельной строкой `FEE` в истории операций. Баланс
+        уменьшается на сумму операции вместе с комиссией.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmountRequest'
+            example:
+              amount: 1000
+      responses:
+        '200':
+          description: Списание выполнено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawResult'
+              example:
+                operation_id: 90125
+                type: WITHDRAW
+                amount: 1000.00
+                fee: 15.00
+                balance: 4985.00
+        '400':
+          description: |
+            Недостаточно средств (`INSUFFICIENT_FUNDS`), сумма не является
+            числом больше нуля (`INVALID_AMOUNT`) или превышает максимум
+            операции (`AMOUNT_LIMIT_EXCEEDED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                insufficient_funds:
+                  value:
+                    error:
+                      code: INSUFFICIENT_FUNDS
+                      message: Недостаточно средств на балансе
+                invalid_amount:
+                  value:
+                    error:
+                      code: INVALID_AMOUNT
+                      message: Сумма должна быть числом больше нуля
+                limit_exceeded:
+                  value:
+                    error:
+                      code: AMOUNT_LIMIT_EXCEEDED
+                      message: Максимальная сумма одной операции — 100000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/wallet/operations:
+    get:
+      tags: [wallet]
+      summary: История своих операций
+      parameters:
+        - name: limit
+          in: query
+          description: Сколько операций вернуть, от 1 до 100.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Сколько операций пропустить.
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: type
+          in: query
+          description: Фильтр по типу операции.
+          required: false
+          schema:
+            type: string
+            enum: [TOPUP, WITHDRAW, FEE]
+      responses:
+        '200':
+          description: Страница истории, свежие операции первыми
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+              example:
+                total: 30
+                items:
+                  - operation_id: 90124
+                    type: TOPUP
+                    amount: 1000.00
+                    comment: Пополнение с карты
+                    created_at: '2026-09-08T12:04:11Z'
+        '400':
+          description: Недопустимое значение параметра
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: INVALID_PARAMETER
+                  message: Параметр limit должен быть от 1 до 100
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/wallet/cashback:
+    get:
+      tags: [wallet]
+      summary: Кэшбэк текущего месяца
+      description: |
+        Оборот текущего календарного месяца, ставка и начисление по кошельку
+        владельца токена. Правила программы лояльности — `CASHBACK.md`
+        в корне бэкенда; здесь описана только форма ответа.
+      responses:
+        '200':
+          description: Оборот, ставка и начисление за текущий месяц
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cashback'
+              example:
+                wallet_id: 41
+                month: '2026-09'
+                turnover: 12345.67
+                rate: 0.0100
+                cashback: 123.46
+                currency: RUB
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/wallets/{wallet_id}/operations:
+    get:
+      tags: [wallets]
+      summary: История операций указанного кошелька
+      description: |
+        Отдаёт историю, только если `wallet_id` принадлежит владельцу токена.
+        Чужой кошелёк — `403`. Заведомо чужой идентификатор для проверки:
+        **`wallet_id = 3`** (демо-кошелёк `demo-03`).
+      parameters:
+        - name: wallet_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 3
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [TOPUP, WITHDRAW, FEE]
+      responses:
+        '200':
+          description: Страница истории своего кошелька
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Кошелёк принадлежит другому пользователю
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: FORBIDDEN
+                  message: Кошелёк принадлежит другому пользователю
+        '404':
+          description: Кошелька с таким id нет
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: Кошелёк не найден
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/sql/schema:
+    get:
+      tags: [sql]
+      summary: Схема, доступная SQL-консоли
+      description: |
+        Список таблиц и колонок, которые видит роль `qa_student`: ровно
+        `public.wallets` и `public.operations`.
+      responses:
+        '200':
+          description: Панель схемы
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlSchema'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/sql/query:
+    post:
+      tags: [sql]
+      summary: Выполнить SELECT-запрос
+      description: |
+        Запрос выполняется ролью `qa_student` в транзакции `READ ONLY`
+        с `statement_timeout = 5s`. Пропускаются только `SELECT` и `WITH`,
+        одна инструкция: точка с запятой внутри запроса — отказ (одна
+        завершающая допускается). Возвращается не больше 300 строк,
+        в этом случае в поле `notice` приходит «показаны первые 300 строк».
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sql]
+              properties:
+                sql:
+                  type: string
+            example:
+              sql: SELECT * FROM wallets LIMIT 5;
+      responses:
+        '200':
+          description: Результат запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlResult'
+        '400':
+          description: |
+            Запрос не прошёл разбор (`SQL_NOT_ALLOWED`) или СУБД вернула
+            ошибку (`SQL_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/assistant/message:
+    post:
+      tags: [assistant]
+      summary: Сообщение AI-ассистенту
+      description: |
+        Ассистент отвечает на вопросы о кошельке владельца токена. Лимиты:
+        30 сообщений в сутки, 1000 символов на сообщение. Если модель
+        недоступна, приходит ответ «Ассистент временно недоступен,
+        попробуйте позже» и `model_available: false` — ассистент никогда
+        не отвечает по памяти и не выдумывает число.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  maxLength: 1000
+                session_id:
+                  type: string
+                  description: Идентификатор сессии чата.
+            example:
+              message: Какой у меня баланс?
+      responses:
+        '200':
+          description: Ответ ассистента
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantReply'
+        '400':
+          description: Пустое или слишком длинное сообщение
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Непрозрачный токен из ответа `POST /api/auth/login`.
+
+  responses:
+    Unauthorized:
+      description: Нет заголовка, битый или просроченный токен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Требуется авторизация
+    TooManyRequests:
+      description: Превышено ограничение 600 запросов в минуту на токен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: TOO_MANY_REQUESTS
+              message: Слишком много запросов, попробуйте позже
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          example: student-07
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      required: [token, wallet_id, login, expires_at]
+      properties:
+        token:
+          type: string
+        wallet_id:
+          type: integer
+        login:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    Balance:
+      type: object
+      required: [wallet_id, balance, currency, tariff]
+      properties:
+        wallet_id:
+          type: integer
+        balance:
+          type: number
+        currency:
+          type: string
+          enum: [RUB]
+        tariff:
+          type: string
+          enum: [BASIC, FREE]
+
+    Cashback:
+      type: object
+      required: [wallet_id, month, turnover, rate, cashback, currency]
+      properties:
+        wallet_id:
+          type: integer
+        month:
+          type: string
+          description: Календарный месяц, `2026-09`.
+        turnover:
+          type: number
+          description: Оборот месяца — сумма списаний.
+        rate:
+          type: number
+          description: 'Ставка, применённая к обороту: `0`, `0.0100` или `0.0200`.'
+        cashback:
+          type: number
+          description: Начисление за месяц, рубли с копейками.
+        currency:
+          type: string
+          enum: [RUB]
+
+    AmountRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: number
+          minimum: 0.01
+          maximum: 100000
+          description: Сумма операции в рублях, до двух знаков после запятой.
+
+    TopupResult:
+      type: object
+      required: [operation_id, type, amount, balance]
+      properties:
+        operation_id:
+          type: integer
+        type:
+          type: string
+          enum: [TOPUP]
+        amount:
+          type: number
+        balance:
+          type: number
+
+    WithdrawResult:
+      type: object
+      required: [operation_id, type, amount, fee, balance]
+      properties:
+        operation_id:
+          type: integer
+        type:
+          type: string
+          enum: [WITHDRAW]
+        amount:
+          type: number
+        fee:
+          type: number
+        balance:
+          type: number
+
+    Operation:
+      type: object
+      required: [operation_id, type, amount, comment, created_at]
+      properties:
+        operation_id:
+          type: integer
+        type:
+          type: string
+          enum: [TOPUP, WITHDRAW, FEE]
+        amount:
+          type: number
+        comment:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    OperationPage:
+      type: object
+      required: [total, items]
+      properties:
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Operation'
+
+    SqlSchema:
+      type: object
+      required: [schema, tables]
+      properties:
+        schema:
+          type: string
+          enum: [public]
+        tables:
+          type: array
+          items:
+            type: object
+            required: [name, columns]
+            properties:
+              name:
+                type: string
+              columns:
+                type: array
+                items:
+                  type: object
+                  required: [name, type]
+                  properties:
+                    name:
+                      type: string
+                    type:
+                      type: string
+        default_query:
+          type: string
+        row_limit:
+          type: integer
+
+    SqlResult:
+      type: object
+      required: [columns, rows, row_count, truncated, markdown]
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items: {}
+        row_count:
+          type: integer
+        truncated:
+          type: boolean
+        notice:
+          type: string
+          nullable: true
+        duration_ms:
+          type: integer
+        markdown:
+          type: string
+          description: Результат markdown-таблицей для вставки в отчёт.
+
+    AssistantReply:
+      type: object
+      required: [reply, model_available]
+      properties:
+        reply:
+          type: string
+        model_available:
+          type: boolean
+        can_retry:
+          type: boolean

@@ -1,0 +1,62 @@
+# Локальный запуск бэкенда «Кошелька» вместе с Postgres 16.
+#
+#   docker compose up -d --build
+#   docker compose exec api python -m tools.seed_demo --cohort-size 20
+#
+# Пароли здесь — заведомо локальные, для разработки. На реальном стенде
+# всё то же самое приходит переменными окружения из .env (см. .env.example).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: wallet
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet
+    ports:
+      # 5433 снаружи: на машине разработчика 5432 обычно уже занят.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet -d wallet"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://wallet:wallet@db:5432/wallet
+      READONLY_DATABASE_URL: postgresql+psycopg2://qa_student:qa_student@db:5432/wallet
+      QA_STUDENT_ROLE: qa_student
+      QA_STUDENT_PASSWORD: qa_student
+      OPERATION_VIEW_PATH: /app/data/operation_view.jsonl
+      CREDENTIALS_OUT: /app/data/cohort-credentials.csv
+      COHORT_SIZE: "20"
+      # Ключ модели ассистента. Не хранится в репозитории: подставляется
+      # из окружения. Пусто — ассистент отдаёт штатную деградацию 6.3.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Прокси до модели: из России api.anthropic.com напрямую не отвечает.
+      AI_PROXY_ENABLED: "${AI_PROXY_ENABLED:-}"
+      AI_PROXY_HOST: "${AI_PROXY_HOST:-}"
+      AI_PROXY_PORT: "${AI_PROXY_PORT:-}"
+      AI_PROXY_USER: "${AI_PROXY_USER:-}"
+      AI_PROXY_PASS: "${AI_PROXY_PASS:-}"
+    ports:
+      - "8000:8000"
+    volumes:
+      # Проекция OperationView и файл с выданными паролями переживают
+      # пересборку контейнера.
+      - appdata:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  appdata:

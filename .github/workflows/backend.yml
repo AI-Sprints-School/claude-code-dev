@@ -1,0 +1,36 @@
+# CI бэкенда «Кошелька» (app/backend/) — готовый, править не нужно.
+# Без Postgres и без Docker: тесты кэшбэка (tests/cashback_test.py) не
+# трогают базу и идут всегда, контрактные тесты API (tests/contract_test.py)
+# разрушительные и без флага WALLET_ALLOW_DESTRUCTIVE_TESTS=1 штатно
+# пропускаются — см. app/backend/README.md и CONTRIBUTING.md.
+# Ожидаемый результат на main — "8 passed, 39 skipped": зелёный прогон,
+# а не красный, это отдельно от курсов с заведомо красным CI.
+
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/backend/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["app/backend/**", ".github/workflows/backend.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Установить зависимости
+        run: pip install -r requirements.txt
+
+      - name: Тесты
+        run: python3 -m pytest -q

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кошелёк</title>
+  <link rel="stylesheet" href="{{ROUTE_BASE}}/styles.css">
+</head>
+<body>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <div class="page">
+    <div id="app-chrome"></div>
+    <main id="app-screen" class="screen"></main>
+    <footer class="app-footer">
+      <span id="app-version" class="app-version"></span>
+      <span class="footer-links">
+        <a href="{{ROUTE_BASE}}/tariffs" data-link>Тарифы и правила</a>
+        <a href="{{ROUTE_BASE}}/sql" data-link>SQL-консоль</a>
+        <a href="/docs">Документация API</a>
+      </span>
+    </footer>
+  </div>
+
+  <script src="{{ROUTE_BASE}}/config.js"></script>
+  <script src="{{ROUTE_BASE}}/js/version.js"></script>
+  <script src="{{ROUTE_BASE}}/js/format.js"></script>
+  <script src="{{ROUTE_BASE}}/js/messages.js"></script>
+  <script src="{{ROUTE_BASE}}/js/amount.js"></script>
+  <script src="{{ROUTE_BASE}}/js/api.js"></script>
+  <script src="{{ROUTE_BASE}}/js/store.js"></script>
+  <script src="{{ROUTE_BASE}}/js/ui.js"></script>
+  <script src="{{ROUTE_BASE}}/js/router.js"></script>
+  <script src="{{ROUTE_BASE}}/js/operations-view.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/login.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/home.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/topup.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/withdraw.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/history.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/assistant.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/tariffs.js"></script>
+  <script src="{{ROUTE_BASE}}/js/screens/sql.js"></script>
+  <script src="{{ROUTE_BASE}}/js/chrome.js"></script>
+  <script src="{{ROUTE_BASE}}/js/app.js"></script>
+</body>
+</html>
